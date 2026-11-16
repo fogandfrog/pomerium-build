@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -58,11 +59,55 @@ func plan(m, d Module) (Plan, error) {
 	}
 	return Plan{m.Path, m.Version, d.Origin.Hash, d.Sum, d.GoModSum}, nil
 }
-func goJSON(dir string, args ...string) (Module, error) {
+func workspace(dir string) (string, error) {
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	file := filepath.Join(root, "go.work")
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		return "off", nil
+	} else if err != nil {
+		return "", err
+	}
+	c := exec.Command("go", "work", "edit", "-json", file)
+	c.Env = append(os.Environ(), "GOWORK="+file, "GOTOOLCHAIN=local")
+	b, err := c.Output()
+	if err != nil {
+		return "", fmt.Errorf("parse Go workspace: %w", err)
+	}
+	var work struct{ Use []struct{ DiskPath string } }
+	if err := json.Unmarshal(b, &work); err != nil {
+		return "", err
+	}
+	if len(work.Use) == 0 {
+		return "", fmt.Errorf("workspace has no local modules")
+	}
+	for _, use := range work.Use {
+		path := use.DiskPath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("workspace module escapes source checkout: %q", use.DiskPath)
+		}
+	}
+	return file, nil
+}
+func goJSON(dir, work string, args ...string) (Module, error) {
 	c := exec.Command("go", args...)
 	c.Dir = dir
 	c.Stderr = os.Stderr
-	c.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
+	c.Env = append(os.Environ(), "GOWORK="+work, "GOTOOLCHAIN=local")
 	b, err := c.Output()
 	if err != nil {
 		return Module{}, fmt.Errorf("go %v: %w", args, err)
@@ -161,10 +206,11 @@ func run() (any, error) {
 		return nil, fmt.Errorf("usage: sourceplan module UPSTREAM_DIR | sourceplan bazel < query.xml")
 	}
 	dir := os.Args[2]
-	if _, err := os.Stat(dir + "/go.work"); err == nil {
-		return nil, fmt.Errorf("upstream go.work requires explicit workspace review")
+	work, err := workspace(dir)
+	if err != nil {
+		return nil, err
 	}
-	m, err := goJSON(dir, "list", "-mod=readonly", "-m", "-json", modulePath)
+	m, err := goJSON(dir, work, "list", "-mod=readonly", "-m", "-json", modulePath)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +218,7 @@ func run() (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := goJSON(dir, "mod", "download", "-json", e.Path+"@"+e.Version)
+	d, err := goJSON(dir, work, "mod", "download", "-json", e.Path+"@"+e.Version)
 	if err != nil {
 		return nil, err
 	}

@@ -22,27 +22,27 @@ The image is public and can be pulled from GHCR without credentials. The initial
 ```yaml
 containers:
   - name: pomerium
-    image: ghcr.io/fogandfrog/pomerium:v0.34.1-build.1
+    image: ghcr.io/fogandfrog/pomerium:v0.34.1-build.2
     args: ["--config", "/pomerium/config.yaml"]
 ```
 
 Supply your own configuration and secrets using normal Pomerium deployment practices. The image contains no application-specific routes, domains, credentials or deployment automation. Its default entrypoint is `/bin/pomerium`.
 
-Versions use `<upstream-version>-build.<packaging-revision>`, for example `v0.34.1-build.1`. These revision tags are write-once. Pin production deployments to the **manifest digest** recorded in the successful build's summary, rather than to the `latest` convenience tag. Publishing a new image never deploys it to a cluster.
+Versions use `<upstream-version>-build.<packaging-revision>`, for example `v0.34.1-build.2`. These revision tags are write-once. Pin production deployments to the **manifest digest** recorded in the successful build's summary, rather than to the `latest` convenience tag. Publishing a new image never deploys it to a cluster.
 
 ## Build, tests and security
 
-The [Build workflow](.github/workflows/build.yaml) checks source identity and licensing, audits source dependencies before execution, builds the UI and Core, and runs upstream version/analytics tests plus our no-reporting regression test. It verifies the Core license and the selected Envoy artifact, scans the final image without exclusions, confirms Go runtime/dependency detection and generates a CycloneDX SBOM. All third-party Actions are pinned to commit hashes.
+The [Build workflow](.github/workflows/build.yaml) checks source identity and licensing, audits source dependencies before execution, builds custom Envoy, the UI and Core from source, and runs upstream version/analytics tests plus our no-reporting regression test. It verifies the Core license and the source-built Envoy license stamp, scans the final image without exclusions, confirms Go runtime/dependency detection and generates a CycloneDX SBOM. All third-party Actions are pinned to commit hashes.
 
 The vulnerability gate blocks CISA KEV matches, EPSS scores of at least 0.10, and fixable HIGH/CRITICAL findings. Unfixed findings below those exploitation thresholds remain visible in the report; a passing gate does not mean zero vulnerabilities. A separate daily Security scan checks the published `latest` image against current advisories. Trivy's Go inventory does not establish complete coverage of the C++ executable embedded in Core; Envoy advisories require separate review.
 
-Each build retains its version/license output, original Envoy OCI manifest, raw and enriched vulnerability reports, SBOM and published digest in the `pomerium-build-evidence` Actions artifact. Dependency license and notice files available in the source trees are bundled under `/usr/share/licenses/pomerium-build` in the image; upstream Core's license also remains at `/pomerium/LICENSE`.
+Each build retains its version/license output, raw and enriched vulnerability reports, SBOM and published digest in the `pomerium-build-evidence` Actions artifact. Envoy module/origin metadata, evaluated Bazel dependencies and its license check are retained separately in `envoy-build-evidence`. Dependency license and notice files available in the source trees are bundled under `/usr/share/licenses/pomerium-build` in the image; upstream Core's license also remains at `/pomerium/LICENSE`.
 
 ## Automatic upstream release checks
 
 A scheduled workflow runs **daily at 09:17 UTC**. It resolves the latest non-draft, non-prerelease Pomerium release to a commit, checks whether its packaging revision already exists, and builds/publishes only a new revision. It does not rebuild or overwrite an existing tag. Security rescanning runs daily at 09:41 UTC.
 
-Automatic publication is conditional on the same licensing, compatibility, tests and vulnerability gates as a manual build. In particular, a release that changes the reviewed Envoy module or the source license stops for maintenance review. The workflow will not silently substitute an old runtime for a new one or distribute a newly restricted binary. A stopped build is visible in Actions; it is not a successful upgrade.
+Automatic publication is conditional on the same licensing, compatibility, tests and vulnerability gates as a manual build. In particular, a release that changes the source license or uses an unsupported dependency declaration stops for maintenance review. The workflow will not silently substitute an old runtime for a new one or distribute a newly restricted binary. A stopped build is visible in Actions; it is not a successful upgrade.
 
 To run manually, select **Build → Run workflow** on `main`, then choose `pinned` for the reviewed default or `latest` for the latest stable release. `config/source.env` records the default source and packaging revision. Increment `BUILD_REVISION` to publish packaging changes for an existing upstream version. Changes to the build pipeline go through a PR and static/behavioral checks.
 
@@ -58,16 +58,18 @@ DO_NOT_TRACK=1
 
 The first two settings explicitly disable product analytics/the routes portal and trace export. `DO_NOT_TRACK` is an additional convention for versions supporting it; the no-reporting guarantee for the reviewed version does not depend on that variable. No Pomerium Zero or Enterprise Console connection is configured. Local logs and metrics remain available. Identity-provider and other application-required connections still occur normally.
 
-## The embedded Envoy licensing detail
+## Envoy built from source
 
-Compiling Core alone is insufficient: its default helper currently fetches an Envoy artifact marked `LicenseRef-Pomerium-Community-Edition-1.0`. Our first build checks caught that distinction.
+Core's default helper downloads a prebuilt custom Envoy binary. We bypass that download and compile the exact `pomerium/envoy-custom` source selected by the chosen Core release. Its source is Apache-2.0; our build explicitly selects the upstream `Apache-2.0` license stamp. No restricted official binary is used and no license marker is removed or rewritten. The older Apache-distributed binary used in `build.1` is no longer needed for new builds.
 
-We select the original Apache-distributed artifact from `f7e948f7e6a4a55332f353ddb66103e9df3a7991`. The [comparison with upstream's selected revision](https://github.com/pomerium/envoy-custom/compare/f7e948f7e6a4a55332f353ddb66103e9df3a7991...e7b75c3a606d) changes only CI, licensing, OCI metadata and documentation; the Envoy 1.38.9 runtime/extension source is identical. The module's Go checksum-database hashes and the Linux amd64 manifest digest are recorded in `config/`.
+Version resolution uses Go's selected module graph and checksum-verified download metadata, including the full Git origin commit. It supports stable tags, pseudo-versions, and same-module version replacements without parsing version strings or depending on `go.mod` line layout. Local/foreign replacements, unexpected workspaces, missing origin/checksums and inconsistent metadata fail closed. The module declaration and checksums remain unchanged.
 
-The workflow checks the original manifest's `Apache-2.0` license annotation and the build verifies that the downloaded binary's lockfile references that exact digest. This older artifact predates the ELF license-stamp section, so `pomerium --version` prints `(no license found)` for Envoy. That output is accepted only for the exact independently verified artifact. We do not strip or rewrite license markers on restricted binaries.
+Bazel evaluates custom Envoy's dependency declarations itself. Its structured query output records the exact upstream Envoy archive commit and SHA-256, so comments, variable names, whitespace and splitting declarations into `.bzl` files do not affect detection. A new repository rule, Bzlmod migration, unpinned archive or unrecognized URL stops for review. This is deliberately strict about changed semantics while tolerating formatting and layout changes.
 
-Future Envoy runtime changes require a new license/compatibility review or our own source build of Envoy. The current pin must not become a reason to retain a vulnerable or incompatible runtime indefinitely.
+The reusable [Envoy workflow](.github/workflows/envoy.yaml) compiles the normal dynamic-extension-capable `envoy.stripped` target, with the custom extensions selected upstream. Its intermediate image uses the same public package with an `envoy-<full-commit>-build.<revision>` tag. It contains the executable, dependency metadata and available license/notice files, and is a build input rather than a runnable service image. Unchanged custom Envoy commits reuse that immutable image, verified by digest, revision and license metadata. Increment `ENVOY_BUILD_REVISION` when changing Envoy build flags or packaging.
+
+Core embeds that digest-pinned executable with a SHA-256 lockfile generated using upstream's own lockfile type and version calculation. The generator checks the ELF license stamp; the final version check must report `Apache-2.0` for Envoy. The C++ compilation is substantially heavier than Core's Go build, so the first build of an Envoy revision can take several hours on a hosted runner. Build or resource failures prevent publication of a new Core image.
 
 ## License
 
-The build code in this repository is [Apache-2.0](LICENSE). Pomerium Core and the selected Envoy artifact retain their upstream licenses; dependencies retain their respective licenses and attribution requirements. See [NOTICE](NOTICE). Apache-2.0 grants no rights to Pomerium trademarks. These images are independent builds, not official Pomerium releases.
+The build code in this repository is [Apache-2.0](LICENSE). Pomerium Core, custom Envoy and upstream Envoy retain their source licenses; dependencies retain their respective licenses and attribution requirements. See [NOTICE](NOTICE). Apache-2.0 grants no rights to Pomerium trademarks. These images are independent builds, not official Pomerium releases.

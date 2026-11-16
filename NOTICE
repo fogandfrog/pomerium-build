@@ -9,7 +9,7 @@ respective contributors and retain their original license terms.
 Pomerium is a trademark of Pomerium, Inc. This project is not affiliated with
 or endorsed by Pomerium, Inc. No trademark rights are granted.
 
-Modifications: build metadata, telemetry defaults, an Envoy dependency pin,
+Modifications: build metadata, telemetry defaults, source-built Envoy packaging,
 additional regression tests and redistribution of dependency notices.
 See config/source.env and the workflow evidence for exact source revisions.
 Dependency license/notice files are included under /usr/share/licenses.

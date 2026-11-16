@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+ARG ENVOY_IMAGE
+FROM ${ENVOY_IMAGE} AS envoy
 # Source is checked out separately at the resolved upstream commit. No official
 # Pomerium Core binary/image is used. Retain upstream build metadata for Trivy.
 FROM node:24.22.2-bookworm@sha256:8fa96264f302f58bbb13aa7339c541547b56975766ce956c875da149452a3e40 AS ui
@@ -17,11 +20,15 @@ RUN apt-get update && apt-get upgrade -y --with-new-pkgs \
 COPY . .
 COPY --from=ui /build/ui/dist ./ui/dist
 RUN go mod download && go mod verify
-# Upstream fetcher verifies the OCI content digests of the embedded Envoy.
-ARG POMERIUM_ENVOY_MANIFEST
-RUN make get-envoy \
-    && grep -q "${POMERIUM_ENVOY_MANIFEST}" pkg/envoy/files/envoy-linux-amd64.lock
-RUN --network=none go test ./internal/version ./internal/analytics
+COPY --from=envoy /envoy ./pkg/envoy/files/envoy-linux-amd64
+COPY --from=envoy /licenses ./build-notices/envoy
+ARG ENVOY_COMMIT
+ARG ENVOY_TIMESTAMP
+# Use upstream's typed lockfile and version calculation. Never download an
+# official Envoy binary, replace a dependency, or alter a license stamp.
+RUN --network=none go run -mod=readonly ./independent-build/embed-envoy \
+    pkg/envoy/files/envoy-linux-amd64 "$ENVOY_COMMIT" "$ENVOY_TIMESTAMP"
+RUN --network=none go test ./internal/version ./internal/analytics ./pkg/envoy/files
 ARG POMERIUM_VERSION
 ARG POMERIUM_COMMIT
 RUN --network=none CGO_ENABLED=0 go build -mod=readonly \

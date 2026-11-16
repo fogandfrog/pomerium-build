@@ -35,5 +35,11 @@ jobs:
         run: |
           tests/resolve-build.sh
           tests/prepare-source.sh
+      - name: Test structured source resolution
+        run: |
+          docker run --rm --network none -v "$PWD:/work:ro" -w /work/tools \
+            -e GOCACHE=/tmp/go-cache -e GOTOOLCHAIN=local \
+            golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea \
+            go test ./sourceplan
       - name: Exercise registry backoff
         run: bash .github/scripts/test-oci-retry.sh

@@ -1,21 +1,14 @@
 #!/usr/bin/env bash
-# Fail closed if upstream licensing or the reviewed Envoy compatibility changes.
+# Fail closed if the source license, checkout or embedding API changes.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=../config/source.env
-source "$ROOT/config/source.env"
 upstream=${1:?Usage: prepare-source UPSTREAM_DIRECTORY EXPECTED_COMMIT}
 commit=${2:?Expected source commit is required}
 [[ $(git -C "$upstream" rev-parse HEAD) == "$commit" ]]
 cmp "$ROOT/LICENSE" "$upstream/LICENSE"
-actual=$(awk '$1=="github.com/pomerium/envoy-custom" {print $2}' "$upstream/go.mod")
-[[ $actual == "$EXPECTED_ENVOY_MODULE" ]] || {
-  echo "Envoy compatibility review required: expected $EXPECTED_ENVOY_MODULE, found $actual" >&2
-  exit 1
-}
-sed -i "s|github.com/pomerium/envoy-custom $EXPECTED_ENVOY_MODULE|github.com/pomerium/envoy-custom $POMERIUM_ENVOY_MODULE|" "$upstream/go.mod"
-printf '\n// Modified by Pomerium Build: pin the reviewed Apache-distributed Envoy artifact.\n' >> "$upstream/go.mod"
-cat "$ROOT/config/envoy-go.sum" >> "$upstream/go.sum"
+test -f "$upstream/pkg/envoy/files/files_linux_amd64.go"
 cp "$ROOT/tests/source-build_test.go" "$upstream/internal/analytics/independent_source_build_test.go"
-mkdir -p "$upstream/build-notices"
+mkdir -p "$upstream/build-notices" "$upstream/independent-build/embed-envoy"
 cp "$ROOT/NOTICE" "$upstream/build-notices/NOTICE"
+cp "$ROOT/tools/embed-envoy/main.go" "$upstream/independent-build/embed-envoy/main.go"
+cp "$ROOT/tests/envoy-source_test.go" "$upstream/pkg/envoy/files/independent_source_build_test.go"

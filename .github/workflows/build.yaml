@@ -3,7 +3,7 @@ name: Build
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, 'config/**', 'scripts/**', 'tests/source-build_test.go', '.github/workflows/build.yaml']
+    paths: ['Dockerfile*', 'config/**', 'scripts/**', 'tools/**', 'tests/*_test.go', '.github/workflows/build.yaml', '.github/workflows/envoy.yaml']
   schedule:
     - cron: '17 9 * * *' # Daily 09:17 UTC; checks the newest stable upstream release.
   workflow_dispatch:
@@ -47,8 +47,15 @@ jobs:
       - name: Summarize selection
         run: cat build-plan.json >> "$GITHUB_STEP_SUMMARY"
 
-  build:
+  envoy:
     needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    uses: ./.github/workflows/envoy.yaml
+    with:
+      pomerium_commit: ${{ needs.resolve.outputs.commit }}
+
+  build:
+    needs: [resolve, envoy]
     if: needs.resolve.outputs.build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -66,17 +73,11 @@ jobs:
           path: upstream
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify licensing and prepare the reviewed dependency pin
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify licensing and prepare the independent source build
         run: |
           set -euo pipefail
           mkdir reports
           scripts/prepare-source upstream "$POMERIUM_COMMIT"
-          source config/source.env
-          printf '%s\n' "POMERIUM_ENVOY_MANIFEST=$POMERIUM_ENVOY_MANIFEST" >> "$GITHUB_ENV"
-          gh api 'repos/pomerium/envoy-custom/contents/LICENSE?ref=f7e948f7e6a4a55332f353ddb66103e9df3a7991' --jq '.content|@base64d' > upstream/build-notices/ENVOY-CUSTOM-LICENSE
-          gh api 'repos/envoyproxy/envoy/contents/NOTICE?ref=17e27840396c1fa3196f184fcb5db1ab13850504' --jq '.content|@base64d' > upstream/build-notices/ENVOY-NOTICE
       - name: Install Trivy
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
@@ -89,11 +90,6 @@ jobs:
             --ignorefile /dev/null --format json --output reports/source.json upstream
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-      - name: Verify the original Envoy artifact license
-        run: |
-          docker buildx imagetools inspect "ghcr.io/pomerium/envoy-custom@$POMERIUM_ENVOY_MANIFEST" \
-            --raw > reports/envoy-manifest.json
-          jq -e '.annotations["org.opencontainers.image.licenses"] == "Apache-2.0"' reports/envoy-manifest.json
       - name: Build and test
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
@@ -111,12 +107,14 @@ jobs:
           build-args: |
             POMERIUM_VERSION=${{ env.POMERIUM_VERSION }}
             POMERIUM_COMMIT=${{ env.POMERIUM_COMMIT }}
-            POMERIUM_ENVOY_MANIFEST=${{ env.POMERIUM_ENVOY_MANIFEST }}
+            ENVOY_IMAGE=${{ needs.envoy.outputs.image }}
+            ENVOY_COMMIT=${{ needs.envoy.outputs.commit }}
+            ENVOY_TIMESTAMP=${{ needs.envoy.outputs.timestamp }}
       - name: Verify the resulting binary
         run: |
           docker run --rm --network none pomerium-build:scan --version | tee reports/version.txt
           grep -q 'Licensed under the terms of the Apache License 2.0' reports/version.txt
-          grep -q 'envoy version 20261102155649-f7e948f7e6a4 (no license found)' reports/version.txt
+          grep -Eq 'envoy version .+ \(Apache-2.0\)' reports/version.txt
       - name: Scan the final image without exclusions
         run: |
           trivy image --image-src docker --scanners vuln --list-all-pkgs --severity CRITICAL,HIGH,MEDIUM \

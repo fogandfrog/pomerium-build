@@ -68,7 +68,7 @@ jobs:
           docker run --rm --network none -v "$PWD:/work:ro" \
             -v "$PWD/envoy-source/independent-build:/output" -w /work/tools \
             -e GOCACHE=/tmp/go-cache -e GOTOOLCHAIN=local "$GO_IMAGE" \
-            go build -o /output/sourceplan ./sourceplan
+            go build -buildvcs=false -o /output/sourceplan ./sourceplan
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Check for an already published immutable Envoy build

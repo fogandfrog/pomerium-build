@@ -1,0 +1,164 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths: [Dockerfile, 'config/**', 'scripts/**', 'tests/source-build_test.go', '.github/workflows/build.yaml']
+  schedule:
+    - cron: '17 9 * * *' # Daily 09:17 UTC; checks the newest stable upstream release.
+  workflow_dispatch:
+    inputs:
+      upstream:
+        description: Upstream source selection
+        type: choice
+        options: [pinned, latest]
+        default: pinned
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-pomerium
+  cancel-in-progress: false
+
+env:
+  TRIVY_SKIP_VERSION_CHECK: 'true'
+  IMAGE: ghcr.io/fogandfrog/pomerium
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+      commit: ${{ steps.plan.outputs.commit }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Require main
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Resolve stable source and skip existing revisions
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'schedule' && 'latest' || inputs.upstream || 'pinned' }}
+        run: scripts/resolve-build "$MODE" | tee build-plan.json
+      - name: Summarize selection
+        run: cat build-plan.json >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      POMERIUM_VERSION: ${{ needs.resolve.outputs.version }}
+      POMERIUM_COMMIT: ${{ needs.resolve.outputs.commit }}
+      IMAGE_TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout pinned upstream source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pomerium/pomerium
+          ref: ${{ env.POMERIUM_COMMIT }}
+          path: upstream
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify licensing and prepare the reviewed dependency pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir reports
+          scripts/prepare-source upstream "$POMERIUM_COMMIT"
+          source config/source.env
+          printf '%s\n' "POMERIUM_ENVOY_MANIFEST=$POMERIUM_ENVOY_MANIFEST" >> "$GITHUB_ENV"
+          gh api 'repos/pomerium/envoy-custom/contents/LICENSE?ref=f7e948f7e6a4a55332f353ddb66103e9df3a7991' --jq '.content|@base64d' > upstream/build-notices/ENVOY-CUSTOM-LICENSE
+          gh api 'repos/envoyproxy/envoy/contents/NOTICE?ref=17e27840396c1fa3196f184fcb5db1ab13850504' --jq '.content|@base64d' > upstream/build-notices/ENVOY-NOTICE
+      - name: Install Trivy
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: trivy@0.71.0
+      - name: Enable registry backoff
+        uses: ./.github/actions/trivy-retry
+      - name: Audit dependencies before execution
+        run: |
+          trivy fs --scanners vuln --severity CRITICAL --exit-code 1 \
+            --ignorefile /dev/null --format json --output reports/source.json upstream
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Verify the original Envoy artifact license
+        run: |
+          docker buildx imagetools inspect "ghcr.io/pomerium/envoy-custom@$POMERIUM_ENVOY_MANIFEST" \
+            --raw > reports/envoy-manifest.json
+          jq -e '.annotations["org.opencontainers.image.licenses"] == "Apache-2.0"' reports/envoy-manifest.json
+      - name: Build and test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: upstream
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          tags: pomerium-build:scan
+          labels: |
+            org.opencontainers.image.source=https://github.com/fogandfrog/pomerium-build
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.version=${{ env.IMAGE_TAG }}
+            org.opencontainers.image.revision=${{ env.POMERIUM_COMMIT }}
+          build-args: |
+            POMERIUM_VERSION=${{ env.POMERIUM_VERSION }}
+            POMERIUM_COMMIT=${{ env.POMERIUM_COMMIT }}
+            POMERIUM_ENVOY_MANIFEST=${{ env.POMERIUM_ENVOY_MANIFEST }}
+      - name: Verify the resulting binary
+        run: |
+          docker run --rm --network none pomerium-build:scan --version | tee reports/version.txt
+          grep -q 'Licensed under the terms of the Apache License 2.0' reports/version.txt
+          grep -q 'envoy version 20261102155649-f7e948f7e6a4 (no license found)' reports/version.txt
+      - name: Scan the final image without exclusions
+        run: |
+          trivy image --image-src docker --scanners vuln --list-all-pkgs --severity CRITICAL,HIGH,MEDIUM \
+            --ignorefile /dev/null --format json --output reports/image.json pomerium-build:scan
+          jq -e 'any(.Results[]; .Type == "gobinary" and any(.Packages[]; .Name == "stdlib"))' reports/image.json
+      - name: Vulnerability gate
+        uses: fogandfrog/trivy-kev-epss-action@8ce910224fb3b7593f38b985092d7ef1762d2e6d # v1.0.0
+        with:
+          report: reports/image.json
+          title: Independent Pomerium build
+          output: reports/image-enriched.json
+      - name: Generate SBOM
+        run: trivy image --image-src docker --format cyclonedx --output reports/sbom.cdx.json pomerium-build:scan
+      - name: Login to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish immutable revision and convenience tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Check again after building; never overwrite an immutable revision.
+          if existing=$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" 2>&1); then
+            echo 'Revision already exists; increment BUILD_REVISION.' >&2; exit 1
+          elif ! grep -Eiq 'manifest unknown|not found|NAME_UNKNOWN|MANIFEST_UNKNOWN' <<< "$existing"; then
+            printf '%s\n' "$existing" >&2; exit 1
+          fi
+          docker tag pomerium-build:scan "$IMAGE:$IMAGE_TAG"
+          docker push "$IMAGE:$IMAGE_TAG"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{.Manifest.Digest}}')
+          [[ $digest =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker tag pomerium-build:scan "$IMAGE:latest"
+          docker push "$IMAGE:latest"
+          printf '%s@%s\n' "$IMAGE" "$digest" | tee reports/image.txt >> "$GITHUB_STEP_SUMMARY"
+          gh api orgs/fogandfrog/packages/container/pomerium --jq '{visibility,repository:.repository.full_name}' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pomerium-build-evidence
+          path: reports/
+          if-no-files-found: warn

@@ -7,7 +7,7 @@
 [![GHCR](https://img.shields.io/badge/GHCR-fogandfrog%2Fpomerium-blue)](https://github.com/orgs/fogandfrog/packages/container/package/pomerium)
 [![Upstream release](https://img.shields.io/github/v/release/pomerium/pomerium?label=upstream)](https://github.com/pomerium/pomerium/releases)
 
-Independent Apache-licensed builds of [Pomerium Core](https://github.com/pomerium/pomerium), published as **`ghcr.io/fogandfrog/pomerium`** for reuse across projects. Maintained by Fog&Frog. This project is not affiliated with or endorsed by Pomerium, Inc.
+Independent Apache-licensed builds of [Pomerium Core](https://github.com/pomerium/pomerium), published as **`ghcr.io/fogandfrog/pomerium`** for reuse across projects. Maintained by [Fog&Frog](https://www.fogandfrog.com/). This project is not affiliated with or endorsed by Pomerium, Inc.
 
 ## Why this exists
 

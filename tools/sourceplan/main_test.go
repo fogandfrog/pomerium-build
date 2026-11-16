@@ -67,9 +67,17 @@ func TestBazelResolution(t *testing.T) {
 		return `<query><rule class="http_archive" name="//external:envoy">` + body + `<string name="sha256" value="` + sum + `"/></rule></query>`
 	}
 	for _, body := range []string{`<string value="` + url + `" name="url"/>`, `<list name="urls"><string value="` + url + `"/></list>`} {
-		p, err := bazelPlan(strings.NewReader(wrap(body)))
-		if err != nil || p["commit"] != hash {
-			t.Fatalf("%v %v", p, err)
+		for _, header := range []string{"", `<?xml version="1.0" encoding="UTF-8"?>`, `<?xml version="1.1" encoding="UTF-8" standalone="no"?>`, `<?xml version='1.1' encoding='utf-8'?>`} {
+			p, err := bazelPlan(strings.NewReader(header + wrap(body)))
+			if err != nil || p["commit"] != hash {
+				t.Fatalf("%v %v", p, err)
+			}
+		}
+	}
+	valid := wrap(`<string name="url" value="` + url + `"/>`)
+	for _, input := range []string{valid + valid, `<?xml version="1.2"?>` + valid, `<?xml version="1.1" encoding="UTF-16"?>` + valid, `<?xml version="1.1"`, strings.ReplaceAll(valid, "query", "unexpected")} {
+		if _, err := bazelPlan(strings.NewReader(input)); err == nil {
+			t.Fatalf("accepted invalid document %q", input)
 		}
 	}
 	for _, input := range []string{`<query/>`, wrap(""), wrap(`<string name="url" value="https://example.com/archive.tar.gz"/>`), strings.ReplaceAll(wrap(`<string name="url" value="`+url+`"/>`), sum, ""), `<not-xml`, strings.ReplaceAll(wrap(`<string name="url" value="`+url+`"/>`), "http_archive", "git_repository")} {

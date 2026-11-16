@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# GitHub-hosted throwaway runner only: remove unused SDKs before the C++ build.
+set -euo pipefail
+[[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_ENVIRONMENT:-} == github-hosted ]]
+# These SDKs belong to the disposable runner, not the checkout or any registry.
+# Writable tool caches can be removed without privileged host commands.
+if [[ -n ${AGENT_TOOLSDIRECTORY:-} && -w $AGENT_TOOLSDIRECTORY ]]; then
+  rm -rf -- "$AGENT_TOOLSDIRECTORY"
+fi
+df -h .

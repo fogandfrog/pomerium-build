@@ -1,0 +1,29 @@
+# Independent build; upstream source is checked out at Go's verified module origin.
+FROM ubuntu:24.04 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git libxml2 build-essential python3 zip unzip autoconf automake libtool patch \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+# Bazel itself is versioned by upstream, checksum-verified before execution.
+RUN set -eu; version=$(cat .bazelversion); \
+    case "$version" in *[!0-9.]*|'') exit 1;; esac; \
+    url="https://github.com/bazelbuild/bazel/releases/download/$version/bazel-$version-linux-x86_64"; \
+    curl -fSL --retry 5 "$url" -o /usr/local/bin/bazel; \
+    curl -fSL --retry 5 "$url.sha256" -o /tmp/bazel.sha256; \
+    echo "$(cut -d ' ' -f1 /tmp/bazel.sha256)  /usr/local/bin/bazel" | sha256sum -c -; \
+    chmod +x /usr/local/bin/bazel
+# Query evaluated repository metadata, not the formatting of WORKSPACE/.bzl files.
+RUN mkdir /out && bazel query //external:envoy --output=xml > /out/envoy-query.xml
+RUN bazel build -c opt --host_platform=//bazel/platforms/rbe:linux_x64 \
+    --platforms=//bazel/platforms/rbe:linux_x64 --jobs=3 --local_ram_resources=10000 \
+    --//:license_name=Apache-2.0 --copt=-g0 --cxxopt=-g0 --fission=no \
+    //:envoy.stripped \
+    && cp -L bazel-bin/envoy.stripped /out/envoy \
+    && /out/envoy --version > /out/version.txt
+RUN mkdir -p /out/licenses && cp LICENSE /out/licenses/ENVOY-CUSTOM-LICENSE \
+    && find -L bazel-*/external -type f \
+    \( -iname '*license*' -o -iname '*licence*' -o -iname '*notice*' -o -iname 'copying*' -o -iname 'copyright*' -o -name AUTHORS -o -name PATENTS \) \
+    -exec cp --parents '{}' /out/licenses/ \;
+FROM scratch
+COPY --from=build /out/ /

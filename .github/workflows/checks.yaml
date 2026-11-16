@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   checks:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install static workflow and shell analyzers
@@ -32,6 +32,8 @@ jobs:
           shellcheck -x --source-path=SCRIPTDIR scripts/* tests/*.sh .github/scripts/*.sh
           for file in scripts/* tests/*.sh .github/scripts/*.sh; do bash -n "$file"; done
       - name: Exercise release detection and registry failures
-        run: tests/resolve-build.sh
+        run: |
+          tests/resolve-build.sh
+          tests/prepare-source.sh
       - name: Exercise registry backoff
         run: bash .github/scripts/test-oci-retry.sh

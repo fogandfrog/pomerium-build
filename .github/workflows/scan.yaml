@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   scan:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     env:
       TRIVY_SKIP_VERSION_CHECK: 'true'
     steps:

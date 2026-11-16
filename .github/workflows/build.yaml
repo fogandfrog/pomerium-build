@@ -28,7 +28,7 @@ env:
 
 jobs:
   resolve:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     outputs:
       build: ${{ steps.plan.outputs.build }}
       version: ${{ steps.plan.outputs.version }}
@@ -50,7 +50,7 @@ jobs:
   build:
     needs: resolve
     if: needs.resolve.outputs.build == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       POMERIUM_VERSION: ${{ needs.resolve.outputs.version }}

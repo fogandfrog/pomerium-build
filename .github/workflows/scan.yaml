@@ -1,0 +1,32 @@
+name: Security scan
+on:
+  schedule:
+    - cron: '41 9 * * *' # Daily 09:41 UTC, after the release check.
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-26.04
+    env:
+      TRIVY_SKIP_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: trivy@0.71.0
+      - uses: ./.github/actions/trivy-retry
+      - name: Rescan published image with current advisories
+        run: |
+          trivy image --image-src remote --scanners vuln --severity CRITICAL,HIGH,MEDIUM \
+            --ignorefile /dev/null --format json --output image.json ghcr.io/fogandfrog/pomerium:latest
+      - uses: fogandfrog/trivy-kev-epss-action@8ce910224fb3b7593f38b985092d7ef1762d2e6d # v1.0.0
+        with:
+          report: image.json
+          output: image-enriched.json
+          title: Published Pomerium build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: security-report
+          path: '*image*.json'

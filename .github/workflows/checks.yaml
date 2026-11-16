@@ -1,0 +1,25 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install static workflow and shell analyzers
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: actionlint@1.7.12,shellcheck@0.11.0
+      - name: Validate workflows and scripts
+        run: |
+          actionlint
+          shellcheck -x --source-path=SCRIPTDIR scripts/* tests/*.sh .github/scripts/*.sh
+          for file in scripts/* tests/*.sh .github/scripts/*.sh; do bash -n "$file"; done
+      - name: Exercise release detection and registry failures
+        run: tests/resolve-build.sh
+      - name: Exercise registry backoff
+        run: bash .github/scripts/test-oci-retry.sh

@@ -1,0 +1,15 @@
+Pomerium Build
+Copyright 2026 Pomerium Build contributors
+
+This independent build compiles Pomerium Core from Apache-2.0 source.
+Pomerium Core is copyright Pomerium, Inc. and its contributors.
+The embedded Envoy distribution and custom extensions are copyright their
+respective contributors and retain their original license terms.
+
+Pomerium is a trademark of Pomerium, Inc. This project is not affiliated with
+or endorsed by Pomerium, Inc. No trademark rights are granted.
+
+Modifications: build metadata, telemetry defaults, an Envoy dependency pin,
+additional regression tests and redistribution of dependency notices.
+See config/source.env and the workflow evidence for exact source revisions.
+Dependency license/notice files are included under /usr/share/licenses.

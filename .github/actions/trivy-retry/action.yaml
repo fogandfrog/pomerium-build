@@ -1,0 +1,26 @@
+name: Trivy registry backoff
+description: Retry transient OCI throttling while preserving Trivy's scan verdict and existing cache.
+runs:
+  using: composite
+  steps:
+    - name: Test retry policy
+      shell: bash
+      env:
+        TOOLS: ${{ github.action_path }}/../../scripts
+      run: bash "$TOOLS/test-oci-retry.sh"
+    - name: Enable bounded Trivy backoff
+      shell: bash
+      env:
+        TOOLS: ${{ github.action_path }}/../../scripts
+      run: |
+        set -euo pipefail
+        real_trivy=$(command -v trivy)
+        retry_dir="$RUNNER_TEMP/trivy-registry-retry"
+        [[ $real_trivy != "$retry_dir/trivy" ]] || { echo 'Trivy wrapper already installed' >&2; exit 1; }
+        mkdir -p "$retry_dir"
+        cp "$TOOLS/oci-retry.sh" "$retry_dir/oci-retry.sh"
+        cp "$TOOLS/trivy-with-retry.sh" "$retry_dir/trivy"
+        chmod +x "$retry_dir/trivy"
+        echo "OCI_TRIVY_BINARY=$real_trivy" >> "$GITHUB_ENV"
+        echo "TRIVY_CMD=$retry_dir/trivy" >> "$GITHUB_ENV"
+        echo "$retry_dir" >> "$GITHUB_PATH"

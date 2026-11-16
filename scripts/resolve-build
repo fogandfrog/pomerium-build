@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Resolve a stable source commit and skip already-published immutable revisions.
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source "$ROOT/config/source.env"
+mode=${1:-pinned}
+case "$mode" in
+  pinned) version=$PINNED_POMERIUM_VERSION; commit=$PINNED_POMERIUM_COMMIT ;;
+  latest)
+    release=$(gh api repos/pomerium/pomerium/releases/latest)
+    jq -e '.draft == false and .prerelease == false' <<< "$release" >/dev/null
+    version=$(jq -er .tag_name <<< "$release")
+    [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid stable release tag' >&2; exit 1; }
+    commit=$(gh api "repos/pomerium/pomerium/commits/$version" --jq .sha)
+    ;;
+  *) echo 'Usage: resolve-build pinned|latest' >&2; exit 2 ;;
+esac
+[[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && $commit =~ ^[a-f0-9]{40}$ && $BUILD_REVISION =~ ^[1-9][0-9]*$ ]]
+tag="$version-build.$BUILD_REVISION"
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+if tags=$(gh api --paginate 'orgs/fogandfrog/packages/container/pomerium/versions?per_page=100' \
+    --jq '.[].metadata.container.tags[]' 2>"$err"); then
+  if grep -Fxq "$tag" <<< "$tags"; then build=false; else build=true; fi
+elif grep -q 'HTTP 404' "$err"; then
+  build=true
+else
+  cat "$err" >&2
+  exit 1
+fi
+jq -n --arg version "$version" --arg commit "$commit" --arg tag "$tag" --arg build "$build" \
+  '{version:$version,commit:$commit,tag:$tag,build:$build}'
+if [[ -n ${GITHUB_OUTPUT:-} ]]; then
+  printf '%s\n' "version=$version" "commit=$commit" "tag=$tag" "build=$build" >> "$GITHUB_OUTPUT"
+fi

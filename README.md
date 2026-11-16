@@ -36,7 +36,7 @@ The [Build workflow](.github/workflows/build.yaml) checks source identity and li
 
 The vulnerability gate blocks CISA KEV matches, EPSS scores of at least 0.10, and fixable HIGH/CRITICAL findings. Unfixed findings below those exploitation thresholds remain visible in the report; a passing gate does not mean zero vulnerabilities. A separate daily Security scan checks the published `latest` image against current advisories. Trivy's Go inventory does not establish complete coverage of the C++ executable embedded in Core; Envoy advisories require separate review.
 
-Each build retains its version/license output, evaluated Envoy dependency metadata, raw and enriched vulnerability reports, SBOM and published digest in the `pomerium-build-evidence` Actions artifact. Dependency license and notice files available in the source trees are bundled under `/usr/share/licenses/pomerium-build` in the image; upstream Core's license also remains at `/pomerium/LICENSE`.
+Each build retains its version/license output, raw and enriched vulnerability reports, SBOM and published digest in the `pomerium-build-evidence` Actions artifact. Envoy module/origin metadata, evaluated Bazel dependencies and its license check are retained separately in `envoy-build-evidence`. Dependency license and notice files available in the source trees are bundled under `/usr/share/licenses/pomerium-build` in the image; upstream Core's license also remains at `/pomerium/LICENSE`.
 
 ## Automatic upstream release checks
 

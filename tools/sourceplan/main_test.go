@@ -2,9 +2,38 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestWorkspace(t *testing.T) {
+	root := t.TempDir()
+	if got, err := workspace(root); err != nil || got != "off" {
+		t.Fatalf("no workspace: %q %v", got, err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "nested"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "go.work")
+	for _, use := range []string{". ./nested", "\".\" \"./nested\""} {
+		if err := os.WriteFile(file, []byte("go 1.27.0\nuse (\n"+strings.ReplaceAll(use, " ", "\n")+"\n)\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := workspace(root); err != nil || got != file {
+			t.Fatalf("local workspace: %q %v", got, err)
+		}
+	}
+	for _, input := range []string{"go 1.27.0\nuse ..\n", "go 1.27.0\n", "invalid workspace"} {
+		if err := os.WriteFile(file, []byte(input), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := workspace(root); err == nil {
+			t.Fatalf("accepted invalid workspace %q", input)
+		}
+	}
+}
 
 func TestModuleSelection(t *testing.T) {
 	const hash = "e7b75c3a606de275146897f0f787fe3cf80ead22"

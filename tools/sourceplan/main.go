@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"debug/elf"
 	"encoding/json"
 	"encoding/xml"
@@ -122,7 +123,8 @@ func goJSON(dir, work string, args ...string) (Module, error) {
 // Bazel query XML is evaluated Starlark: variables, comments, aliases and file
 // layout do not affect resolution. Unknown repository rules stop for review.
 type Query struct {
-	Rules []Rule `xml:"rule"`
+	XMLName xml.Name `xml:"query"`
+	Rules   []Rule   `xml:"rule"`
 }
 type Rule struct {
 	Name    string  `xml:"name,attr"`
@@ -139,9 +141,50 @@ type Value struct {
 }
 
 func bazelPlan(r io.Reader) (map[string]string, error) {
-	var q Query
-	if err := xml.NewDecoder(r).Decode(&q); err != nil {
+	// Bazel emits XML 1.1, while encoding/xml implements XML 1.0. Parse and
+	// validate the declaration separately, then accept only the XML 1.0-compatible
+	// subset of its payload. XML 1.1-only characters still fail closed.
+	b, err := io.ReadAll(io.LimitReader(r, 4*1024*1024+1))
+	if err != nil {
 		return nil, err
+	}
+	if len(b) > 4*1024*1024 {
+		return nil, fmt.Errorf("oversized Bazel query result")
+	}
+	if bytes.HasPrefix(b, []byte("<?xml ")) {
+		header, rest, ok := bytes.Cut(b, []byte("?>"))
+		if !ok {
+			return nil, fmt.Errorf("unterminated XML declaration")
+		}
+		var decl struct {
+			Attributes []xml.Attr `xml:",any,attr"`
+		}
+		if err := xml.Unmarshal(append(append([]byte("<declaration "), header[len("<?xml "):]...), []byte("/>")...), &decl); err != nil {
+			return nil, err
+		}
+		attrs := map[string]string{}
+		for _, attr := range decl.Attributes {
+			if _, exists := attrs[attr.Name.Local]; exists {
+				return nil, fmt.Errorf("duplicate XML declaration attribute")
+			}
+			attrs[attr.Name.Local] = attr.Value
+			if attr.Name.Space != "" || (attr.Name.Local != "version" && attr.Name.Local != "encoding" && attr.Name.Local != "standalone") {
+				return nil, fmt.Errorf("unsupported XML declaration")
+			}
+		}
+		if (attrs["version"] != "1.0" && attrs["version"] != "1.1") || (attrs["encoding"] != "" && !strings.EqualFold(attrs["encoding"], "UTF-8")) || (attrs["standalone"] != "" && attrs["standalone"] != "yes" && attrs["standalone"] != "no") {
+			return nil, fmt.Errorf("unsupported XML version or encoding")
+		}
+		b = rest
+	}
+	var q Query
+	decoder := xml.NewDecoder(bytes.NewReader(b))
+	if err := decoder.Decode(&q); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("trailing or ambiguous Bazel query result")
 	}
 	if len(q.Rules) != 1 || q.Rules[0].Name != "//external:envoy" || q.Rules[0].Class != "http_archive" {
 		return nil, fmt.Errorf("expected exactly one Envoy http_archive; new Bazel dependency scheme needs review")

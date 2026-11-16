@@ -13,7 +13,19 @@ jobs:
       - name: Install static workflow and shell analyzers
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
-          tool: actionlint@1.7.12,shellcheck@0.11.0
+          tool: shellcheck@0.11.0
+      - name: Install checksum-verified actionlint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          gh release download v1.7.12 --repo rhysd/actionlint --dir "$RUNNER_TEMP/actionlint" \
+            --pattern 'actionlint_1.7.12_linux_amd64.tar.gz' --pattern '*checksums.txt'
+          cd "$RUNNER_TEMP/actionlint"
+          sha256sum --check --ignore-missing ./*checksums.txt
+          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
       - name: Validate workflows and scripts
         run: |
           actionlint

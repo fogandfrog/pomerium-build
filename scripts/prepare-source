@@ -2,6 +2,7 @@
 # Fail closed if upstream licensing or the reviewed Envoy compatibility changes.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=../config/source.env
 source "$ROOT/config/source.env"
 upstream=${1:?Usage: prepare-source UPSTREAM_DIRECTORY EXPECTED_COMMIT}
 commit=${2:?Expected source commit is required}

@@ -2,6 +2,7 @@
 # Resolve a stable source commit and skip already-published immutable revisions.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=../config/source.env
 source "$ROOT/config/source.env"
 mode=${1:-pinned}
 case "$mode" in

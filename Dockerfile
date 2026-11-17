@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-ARG ENVOY_IMAGE
+# The workflow supplies a verified digest. Without it, the required Envoy COPY
+# fails against scratch rather than downloading an unreviewed fallback image.
+ARG ENVOY_IMAGE=scratch
 FROM ${ENVOY_IMAGE} AS envoy
 # Source is checked out separately at the resolved upstream commit. No official
 # Pomerium Core binary/image is used. Retain upstream build metadata for Trivy.

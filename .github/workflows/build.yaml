@@ -45,7 +45,7 @@ jobs:
           MODE: ${{ github.event_name == 'schedule' && 'latest' || inputs.upstream || 'pinned' }}
         run: scripts/resolve-build "$MODE" | tee build-plan.json
       - name: Summarize selection
-        run: cat build-plan.json >> "$GITHUB_STEP_SUMMARY"
+        run: scripts/summarize-build resolve build-plan.json >> "$GITHUB_STEP_SUMMARY"
 
   envoy:
     needs: resolve
@@ -151,8 +151,9 @@ jobs:
           [[ $digest =~ ^sha256:[a-f0-9]{64}$ ]]
           docker tag pomerium-build:scan "$IMAGE:latest"
           docker push "$IMAGE:latest"
-          printf '%s@%s\n' "$IMAGE" "$digest" | tee reports/image.txt >> "$GITHUB_STEP_SUMMARY"
-          gh api orgs/fogandfrog/packages/container/pomerium --jq '{visibility,repository:.repository.full_name}' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s@%s\n' "$IMAGE" "$digest" | tee reports/image.txt
+          gh api orgs/fogandfrog/packages/container/pomerium --jq '{visibility,repository:.repository.full_name}' > reports/package.json
+          scripts/summarize-build published reports "$IMAGE:$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

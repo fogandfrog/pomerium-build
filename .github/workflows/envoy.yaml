@@ -127,7 +127,6 @@ jobs:
           docker run --rm --network none -v "$PWD:/work:ro" -w /work/tools \
             -e GOCACHE=/tmp/go-cache -e GOTOOLCHAIN=local "$GO_IMAGE" \
             go run ./sourceplan license /work/.cache/envoy > reports/envoy-license.json
-          cat reports/envoy-module.json reports/envoy-upstream.json >> "$GITHUB_STEP_SUMMARY"
       - name: Scan Envoy distribution
         if: steps.cache.outputs.exists != 'true'
         run: trivy image --image-src docker --scanners vuln --ignorefile /dev/null --severity CRITICAL --exit-code 1 envoy-build:scan
@@ -156,8 +155,18 @@ jobs:
           docker pull "$IMAGE@$digest"
           test "$(docker inspect "$IMAGE@$digest" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$COMMIT"
           test "$(docker inspect "$IMAGE@$digest" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = Apache-2.0
+          # Cached images carry the same complete source/license evidence as a
+          # fresh build. Retain it in the artifact and summarize it in either case.
+          id=$(docker create "$IMAGE@$digest" /envoy)
+          trap 'docker rm "$id" >/dev/null' EXIT
+          docker cp "$id:/envoy-query.xml" reports/envoy-query.xml
+          docker cp "$id:/envoy-upstream.json" reports/envoy-upstream.json
+          docker cp "$id:/envoy-license.json" reports/envoy-license.json
+          docker cp "$id:/version.txt" reports/envoy-version.txt
+          docker rm "$id" >/dev/null
+          trap - EXIT
           echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
-          echo "Envoy: $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
+          scripts/summarize-build envoy reports "$IMAGE@$digest" "$CACHED" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload source resolution evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

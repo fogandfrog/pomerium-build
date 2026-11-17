@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Render job evidence as Markdown; keep structured data in separate JSON blocks.
+set -euo pipefail
+json_section() {
+  printf '#### %s\n\n```json\n' "$1"
+  jq . "$2"
+  printf '```\n\n'
+}
+text_section() {
+  local content
+  content=$(<"$2")
+  while [[ $content == $'\n'* ]]; do content=${content#$'\n'}; done
+  printf '#### %s\n\n```text\n' "$1"
+  printf '%s\n```\n\n' "$content"
+}
+mode=${1:?Usage: summarize-build resolve PLAN | envoy REPORTS IMAGE CACHED | published REPORTS TAG}
+case "$mode" in
+  resolve)
+    plan=${2:?Build plan is required}
+    printf '### Pomerium source selection\n\n'
+    case $(jq -r '.build | tostring' "$plan") in
+      true) printf 'A new image revision will be built and checked before publication.\n\n' ;;
+      false) printf 'This immutable revision is already published; no rebuild is needed.\n\n' ;;
+      *) echo 'Invalid build decision' >&2; exit 1 ;;
+    esac
+    json_section 'Selected source and image revision' "$plan"
+    ;;
+  envoy)
+    reports=${2:?Reports directory is required}
+    image=${3:?Image reference is required}
+    cached=${4:?Cache decision is required}
+    printf '### Source-built Envoy\n\n'
+    case "$cached" in
+      true) printf 'Reused the verified Envoy image for the selected source commit.\n\n' ;;
+      false) printf 'Compiled, verified and published Envoy from the selected source commit.\n\n' ;;
+      *) echo 'Invalid cache decision' >&2; exit 1 ;;
+    esac
+    # Markdown code spans intentionally contain literal backticks.
+    # shellcheck disable=SC2016
+    printf '**Image:** `%s`\n\n' "$image"
+    json_section 'Selected Go module' "$reports/envoy-module.json"
+    json_section 'Upstream Envoy source archive' "$reports/envoy-upstream.json"
+    json_section 'Embedded license' "$reports/envoy-license.json"
+    text_section 'Runtime version' "$reports/envoy-version.txt"
+    ;;
+  published)
+    reports=${2:?Reports directory is required}
+    tag=${3:?Image tag is required}
+    # shellcheck disable=SC2016
+    printf '### Published Pomerium\n\n**Tag:** `%s`\n\n' "$tag"
+    text_section 'Immutable image reference' "$reports/image.txt"
+    text_section 'Version and license' "$reports/version.txt"
+    json_section 'Registry metadata' "$reports/package.json"
+    ;;
+  *) echo "Unknown summary mode: $mode" >&2; exit 2 ;;
+esac

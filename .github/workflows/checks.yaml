@@ -46,6 +46,7 @@ jobs:
           repository: pomerium/pomerium
           ref: ${{ steps.upstream.outputs.commit }}
           path: upstream
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify backported connection cleanup
         run: |

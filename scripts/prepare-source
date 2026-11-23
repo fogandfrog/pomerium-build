@@ -7,9 +7,25 @@ commit=${2:?Expected source commit is required}
 [[ $(git -C "$upstream" rev-parse HEAD) == "$commit" ]]
 cmp "$ROOT/LICENSE" "$upstream/LICENSE"
 test -f "$upstream/pkg/envoy/files/files_linux_amd64.go"
-# Backport Pomerium #7028: Go 1.27 otherwise retains one admin connection
-# per readiness check. Fail closed when upstream changes or includes the fix.
-patch --batch --forward --fuzz=0 -p1 -d "$upstream" < "$ROOT/patches/envoy-admin-close-idle.patch"
+# TEMPORARY until a selected upstream release contains PR #7028. The release
+# resolver selects stable tags; full upstream history is required for this gate.
+# Removal checklist: https://github.com/fogandfrog/pomerium-build/issues/10
+upstream_fix=281830c45247c964507a705edf532067c8e31151
+if git -C "$upstream" merge-base --is-ancestor "$upstream_fix" "$commit"; then
+  echo 'Selected upstream release includes PR #7028. Remove the temporary backport; retain its regression test: https://github.com/fogandfrog/pomerium-build/issues/10' >&2
+  exit 1
+else
+  ancestry_status=$?
+  if ((ancestry_status != 1)); then
+    echo 'Cannot check the temporary backport release gate; fetch full upstream history. See https://github.com/fogandfrog/pomerium-build/issues/10' >&2
+    exit "$ancestry_status"
+  fi
+fi
+# This also catches release-branch cherry-picks whose commit identity differs.
+if ! patch --batch --forward --fuzz=0 -p1 -d "$upstream" < "$ROOT/patches/envoy-admin-close-idle.patch"; then
+  echo 'Temporary backport no longer applies. Check whether this release includes the upstream fix and follow https://github.com/fogandfrog/pomerium-build/issues/10' >&2
+  exit 1
+fi
 cp "$ROOT/tests/admin-connections_test.go" "$upstream/pkg/envoy/independent_admin_connections_test.go"
 cp "$ROOT/tests/source-build_test.go" "$upstream/internal/analytics/independent_source_build_test.go"
 mkdir -p "$upstream/build-notices" "$upstream/independent-build/embed-envoy"

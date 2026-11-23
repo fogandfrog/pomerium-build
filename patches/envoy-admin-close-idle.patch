@@ -1,3 +1,6 @@
+# TEMPORARY backport for released Pomerium versions that lack upstream PR #7028.
+# Remove when promoting a release containing commit 281830c45247c964507a705edf532067c8e31151; retain the connection regression test.
+# Tracking and removal checklist: https://github.com/fogandfrog/pomerium-build/issues/10
 diff --git a/pkg/envoy/dynamic_extensions.go b/pkg/envoy/dynamic_extensions.go
 index ab266e18c36..a50256ac647 100644
 --- a/pkg/envoy/dynamic_extensions.go

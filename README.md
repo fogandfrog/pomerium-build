@@ -30,6 +30,14 @@ Supply your own configuration and secrets using normal Pomerium deployment pract
 
 Versions use `<upstream-version>-build.<packaging-revision>`, for example `v0.34.1-build.2`. These revision tags are write-once. Pin production deployments to the **manifest digest** recorded in the successful build's summary, rather than to the `latest` convenience tag. Publishing a new image never deploys it to a cluster.
 
+## Envoy admin connection leak backport
+
+Build revision 4 backports the Envoy admin client cleanup from [upstream PR #7028](https://github.com/pomerium/pomerium/pull/7028) to v0.34.1. With Go 1.27, the readiness check's newly allocated HTTP transport retains an idle admin connection every 30 seconds. Over several days, the accumulated connections consume enough container memory to activate Envoy's overload protection. At 95% of the memory limit, Envoy stops accepting public connections while its readiness endpoint continues reporting healthy; the kernel does not OOM-kill the container because it remains below its hard limit.
+
+The backport explicitly closes idle connections after readiness, dynamic extension status and drain requests. It preserves the existing memory limit and overload protection. The build runs a regression test against the actual readiness implementation with a chunked Envoy-style response, requiring all connections to close after repeated checks. Patch application refuses mismatched or already patched source; remove the backport deliberately when upgrading to an upstream release that includes the fix.
+
+The 2026-11-23 Aritas incident confirmed 18,200 retained admin connections after six days, 95.76% cgroup memory saturation, active `stop_accepting_connections`, and zero cgroup OOM events. Restarting Pomerium restored the login redirect and reduced reported memory from 939 MiB to 61 MiB. Restarting is temporary recovery; deploy the backported image to prevent recurrence.
+
 ## Build, tests and security
 
 The [Build workflow](.github/workflows/build.yaml) checks source identity and licensing, audits source dependencies before execution, builds custom Envoy, the UI and Core from source, and runs upstream version/analytics tests plus our no-reporting regression test. It verifies the Core license and the source-built Envoy license stamp, scans the final image without exclusions, confirms Go runtime/dependency detection and generates a CycloneDX SBOM. All third-party Actions are pinned to commit hashes.

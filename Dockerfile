@@ -31,6 +31,7 @@ ARG ENVOY_TIMESTAMP
 RUN --network=none go run -mod=readonly ./independent-build/embed-envoy \
     pkg/envoy/files/envoy-linux-amd64 "$ENVOY_COMMIT" "$ENVOY_TIMESTAMP"
 RUN --network=none go test ./internal/version ./internal/analytics ./pkg/envoy/files
+RUN --network=none go test ./pkg/envoy -run '^TestIndependentAdminConnectionsReleased$' -count=1
 ARG POMERIUM_VERSION
 ARG POMERIUM_COMMIT
 RUN --network=none CGO_ENABLED=0 go build -mod=readonly \

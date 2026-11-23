@@ -1,0 +1,32 @@
+diff --git a/pkg/envoy/dynamic_extensions.go b/pkg/envoy/dynamic_extensions.go
+index ab266e18c36..a50256ac647 100644
+--- a/pkg/envoy/dynamic_extensions.go
++++ b/pkg/envoy/dynamic_extensions.go
+@@ -210,6 +210,7 @@ func (srv *Server) envoyDynamicExtStatus(ctx context.Context) (*extensionStatusI
+ 		Path:   "/dynamic_extensions/status",
+ 	}
+ 	client := envoyAdminClient(adminAddress)
++	defer client.CloseIdleConnections()
+ 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+ 	if err != nil {
+ 		return nil, err
+diff --git a/pkg/envoy/envoy.go b/pkg/envoy/envoy.go
+index 958333e954b..79009c47e73 100644
+--- a/pkg/envoy/envoy.go
++++ b/pkg/envoy/envoy.go
+@@ -174,6 +174,7 @@ func Drain(adminAddress netutil.InternalAddress) error {
+ 		Path:   "/drain_listeners",
+ 	}
+ 	client := envoyAdminClient(adminAddress)
++	defer client.CloseIdleConnections()
+ 
+ 	req, err := http.NewRequest(http.MethodPost, u.String(), nil)
+ 	if err != nil {
+@@ -497,6 +498,7 @@ func (srv *Server) envoyReady(ctx context.Context) error {
+ 		Path:   "/ready",
+ 	}
+ 	client := envoyAdminClient(adminAddress)
++	defer client.CloseIdleConnections()
+ 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+ 	if err != nil {
+ 		return err

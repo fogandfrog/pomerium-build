@@ -3,7 +3,7 @@ name: Build
 on:
   push:
     branches: [main]
-    paths: ['Dockerfile*', 'config/**', 'scripts/**', 'tools/**', 'tests/*_test.go', '.github/workflows/build.yaml', '.github/workflows/envoy.yaml']
+    paths: ['Dockerfile*', 'config/**', 'patches/**', 'scripts/**', 'tools/**', 'tests/*_test.go', '.github/workflows/build.yaml', '.github/workflows/envoy.yaml']
   schedule:
     - cron: '17 9 * * *' # Daily 09:17 UTC; checks the newest stable upstream release.
   workflow_dispatch:
